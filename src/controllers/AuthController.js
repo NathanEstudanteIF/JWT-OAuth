@@ -3,9 +3,24 @@ import jwt from "jsonwebtoken";
 import axios from "axios";
 import qs from "query-string";
 import User from "../models/user.js";
+import { v4 as uuidv4 } from "uuid"
 import { JWT_SECRET } from "../middlewares/auth.js";
+import RefreshToken from "../models/refreshToken.js";
 
-// Funções auxiliares para o GitHub
+async function createRefreshToken(user) {
+  const expiredAt = new Date();
+  expiredAt.setSeconds(expiredAt.getSeconds() + 86400);
+  const token = uuidv4();
+
+  const refreshToken = await RefreshToken.create({
+    token: token,
+    userId: user.id,
+    expiresAt: expiredAt.getTime(),
+  });
+
+  return refreshToken;
+}
+
 async function exchangeCodeForAccessToken(code) {
   const GITHUB_ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
   const params = {
@@ -37,7 +52,6 @@ async function fetchUser(token) {
 
   const user = response.data;
 
-  // Se o e-mail for privado, precisamos buscar no endpoint de e-mails
   if (!user.email) {
     const emailsResponse = await axios.get("https://api.github.com/user/emails", {
       headers: { Authorization: `Bearer ${token}` },
@@ -125,10 +139,18 @@ export default {
       };
 
       const token = jwt.sign({ user: JSON.stringify(payload) }, JWT_SECRET, {
-        expiresIn: "60m",
+        expiresIn: "20s",
       });
 
-      return res.status(200).json({ data: { user: payload, token } });
+      const refreshToken = await createRefreshToken(user);
+
+      return res.status(200).json({
+        data: {
+          user: payload,
+          token,
+          refreshToken
+        }
+      });
     } catch (error) {
       return res.status(500).json({ message: "Erro no login", error });
     }
@@ -177,12 +199,73 @@ export default {
         expiresIn: "24h",
       });
 
-      res.status(200).json({ token: jwtToken });
+      const refreshToken = await createRefreshToken(user);
+
+      return res.status(200).json({
+        data: {
+          user: tokenPayload,
+          jwtToken,
+          refreshToken
+        }
+      });
     } catch (err) {
       console.log("err", err.response?.data || err.message);
       res
         .status(500)
         .json({ mensagem: "Erro ao processar autenticação", erro: err.message });
     }
-  }
+  },
+
+  async refreshToken(req, res) {
+    const { requestToken } = req.body;
+    if (!requestToken) {
+      return res.status(403).json({ message: "Refresh Token é necessário!" });
+    }
+    try {
+      const refreshToken = await RefreshToken.findOne({ where: { token: requestToken } });
+
+      if (!refreshToken) {
+        return res.status(403).json({ message: "Refresh token não está no banco de dados!" });
+      }
+
+      if (RefreshToken.verifyExpiration(refreshToken)) {
+        RefreshToken.destroy({ where: { id: refreshToken.id } });
+        return res.status(403).json({
+          message: "Refresh token expirou. Por favor, faça login novamente.",
+        });
+      }
+
+      const user = await User.findByPk(refreshToken.userId);
+
+      const payload = {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      };
+
+      const newAccessToken = jwt.sign({ user: JSON.stringify(payload) }, JWT_SECRET, { expiresIn: "20s" });
+
+      return res.status(200).json({
+        accessToken: newAccessToken,
+        refreshToken: refreshToken.token,
+      });
+    } catch (err) {
+      return res.status(500).send({ message: err });
+    }
+  },
+
+  async logout(req, res) {
+    try {
+      const { requestToken } = req.body;
+      if (!requestToken) {
+        return res.status(400).json({ message: "Refresh Token é necessário para logout!" });
+      }
+      await RefreshToken.destroy({ where: { token: requestToken } });
+      return res.status(200).json({ message: "Logout realizado com sucesso!"
+    });
+    } catch (err) {
+      return res.status(500).send({ message: err });
+    }
+  },
 };

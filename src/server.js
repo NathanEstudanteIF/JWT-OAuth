@@ -13,19 +13,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Rotas
 app.get("/", (_, res) => res.status(200).json({ message: "API disponível" }));
 app.use("/auth", authRoutes);
 app.use(privateRoutes);
 
-// Inicialização do Banco e Servidor
 (async () => {
   try {
     await sequelize.authenticate();
     await sequelize.sync();
     console.log("Banco sincronizado com sucesso.");
 
-    // Seed de usuário Admin
     const adminExists = await User.findOne({ where: { email: "admin@example.com" } });
     if (!adminExists) {
       const hashedPassword = await bcrypt.hash("admin123", 10);

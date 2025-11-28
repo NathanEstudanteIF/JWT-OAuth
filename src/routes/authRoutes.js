@@ -8,5 +8,7 @@ router.post("/register", tokenValidated, isAdmin, AuthController.register);
 router.post("/login", AuthController.login);
 router.get("/github", AuthController.githubLogin);
 router.get("/github/callback", AuthController.githubCallback);
+router.post("/refresh-token", AuthController.refreshToken);
+router.post("/logout", AuthController.logout);
 
 export default router;
