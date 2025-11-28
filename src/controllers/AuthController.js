@@ -18,7 +18,7 @@ async function createRefreshToken(user) {
     expiresAt: expiredAt.getTime(),
   });
 
-  return refreshToken;
+  return refreshToken.token;
 }
 
 async function exchangeCodeForAccessToken(code) {
